@@ -2,6 +2,12 @@
 
 I really like games that have random map/room generation capabilities. Probably doesn't surprise you that I like to build games that use one. This repo contains the Generator object we'll be building up to generate rooms and floors/levels.
 
+## Table of Contents
+[Build 1 - Generate a room](#build-1)
+
+[Build 2 - Adding Physics to the Walls](#build-2)
+
+
 ## Build 1
 **Build 1 is in Godot 4.5.1**
 
@@ -315,3 +321,278 @@ click on the Tile Map Layer field in the properties to open up a dialog to selec
 Since this is the only scene, we're going to test using the F6 / Run Scene functionality of Godot. Make sure the Generator Scene is open in the Scene window and press F6. You should see a window something like the below open up. Try out different settings for the Generator in the Inspector window to set different room sizes.
 
 ![A room will be generated and you'll see a dark brown line around the room](/readmeassets/build_1/1_room_generated.png)
+
+## Build 2
+
+In this section, we're going to add physics to our generator and, also, a trick to place the player into a room. On the physics side, our goal is to not allow the player to cross the wall boundary for our game. We also want them to move on a floor, so we'll add some tiles to our output for that, based on the tileset we already did. Finally, the trick that I mentioned. We'll add a function to get a location that we can place the player at within the room.
+
+### First thing - adding a physics layer
+
+Open the Generator project and the Generator scene. Click on the "DefaultTileMap" in the Scene browser.
+
+![Open the Generator scene and select the DefaultTileMap object](/readmeassets/build_2/2_select_the_defaulttilemap.png)
+
+In the Inspector window, click on the TileSet value to open the TileSet details, expand the "Physics Layer" section, and click the "+ Add Element" button in the Physics Layer section.
+
+![Add the physics layer to the tileset that we created before](/readmeassets/build_2/2_add_the_physics_layer.png)
+
+We're going to set the Collision Layer to "2" and turn off the Collision Mask (nothing is selected). I typically use Collision Layer 2 for all my wall objects. This allows me to not have to worry about re-defining wall collisions in the future and I can just focus on the game.
+
+![Set the collision layer to 2 and the collision mask to 0](/readmeassets/build_2/2_set_the_collision_layers.png)
+
+Now we need to define what part of the tileset matchest to the physics layer. Because this it the first physics layer for this tileset, it will be called Physics Layer 0. Click on the TileSet tab in the lower window so we can edit properties of the tileset.
+
+![Edit the properties of the tileset](/readmeassets/build_2/2_edit_tileset.png)
+
+Next, click the "Paint" tool and select "Physics Layer 0" in the Paint Properties field. Finally, click the upper left hand dark brown square, so that it is highlighted as it is below.
+
+![Select the tile that will be used for Physics Layer 0](/readmeassets/build_2/2_set_the_collision_tile.png)
+
+Now, save the project and we can move on to the coding!
+
+### Adding code for floors and player start location
+
+We're going to start this work in the generator_node.gd file. Open it up and let's take a look at a couple of items before we add the code.
+
+First, in the `generate` function, note that a `room_listing` is being stored. This room listing is a dictionary and contains the room definition. Eventually, this will hold an entire floor's worth of rooms, but, for now, it's just a single item. We will want to start the player somewhere in that room location.
+
+```
+func generate() -> void:
+	var grid: Dictionary = {Vector2i(0,0): {"x_start": 0, "y_start": 0}}
+	room_listing = _generate_room(grid)
+	_draw_rooms()
+```
+
+We also need to be aware of our texture size for the walls. If you explore the TileMapLayer, you'll be able to see the rendering quadrant size is 16, meaning a 16x16 square. When the room is built, it starts at Vector 0,0. Since the rendering is 16 x 16, we must account for this when placing the player. If the room is 50 x 50 tiles, we will have 800 x 800 in pixels, but 32 on each edge (up and down, left and right) are taken up by the rendering for our walls. The math needs to be adjusted to 0 + rendering and 800 - rendering, or 32, 768 for where we can place the player.
+
+The rendering quadrant size of a TileMapLayer may change, depending on our graphics and game, so this should be added to our thinking. The lazy way is to add it to the initialization, pass it in from the outside. This, however, can break if you forget to reset it or if you change your TileMapLayer while you're working on your game. The goal for this should be to not have to adjust your code for any changes like that.
+
+To do this, let's declare a script variable right after our vectors for the terrains with this code:
+
+```
+var wall_tile_quadrant_size: int = 0
+```
+
+In `_get_main_tiles`, we will capture the value right after the `var terrains = {}` line:
+
+```
+	wall_tile_quadrant_size = tile_map_layer.rendering_quadrant_size
+```
+
+Next, we'll add a new function `get_player_start` to this using the following code to randomly find a location for the Player
+
+```
+func get_player_start() -> Vector2i:
+	var start_location: Vector2i
+	start_location = Vector2i(randi_range(room_listing["x"] + wall_tile_quadrant_size, (room_listing["height"] - 1) * wall_tile_quadrant_size ), 
+			randi_range(room_listing["y"] + wall_tile_quadrant_size, (room_listing["width"] - 1) * wall_tile_quadrant_size ))
+	return start_location
+```
+
+Lastly, in the `generator_node.gd`, we are going to add painting of the floor tiles. Update the `_draw_rooms` function with the following code:
+
+```
+func _draw_rooms() -> void:
+	if draw_outline:
+		for x in range(0, game_width):
+			if x % 25 == 0:
+				tile_map_layer.set_cell(Vector2i(x,0), 0, floor_vector)
+			else:
+				tile_map_layer.set_cell(Vector2i(x,0), 0, filler_vector)
+		for y in range(0, game_height):
+			if y % 25 == 0:
+				tile_map_layer.set_cell(Vector2i(0,y), 0, floor_vector)
+			else:
+				tile_map_layer.set_cell(Vector2i(0,y), 0, filler_vector)
+
+	for x in range(room_listing["x"], (room_listing["x"] + room_listing["width"] + 1)):
+		for y in range(room_listing["y"], (room_listing["y"] + room_listing["height"] + 1)):
+			if x == room_listing["x"] || x == (room_listing["x"] + room_listing["width"]):
+				tile_map_layer.set_cell(Vector2i(x,y), 0, wall_vector)
+			elif y == room_listing["y"] || y == (room_listing["y"] + room_listing["height"]):
+				tile_map_layer.set_cell(Vector2i(x,y), 0, wall_vector)
+			else:
+				tile_map_layer.set_cell(Vector2i(x,y), 0, floor_vector)
+```
+
+We won't want to call this function from the world to the generator_node, so let's add a wrapper function in the `generator.gd` file to call this.
+
+```
+func get_player_start() -> Vector2:
+	return $GeneratorNode.get_player_start()
+```
+
+And, before we finish up with this build, let's update the Generators `_ready` function to call `player_start` so that we can make sure it is working. Your new ready should look like this:
+
+```
+func _ready() -> void:
+	$GeneratorNode.initialize(min_room_width, min_room_height, max_room_width, max_room_height, game_width,
+		game_height, tile_map_layer, draw_outline)
+	if get_parent().name == "root":
+		$GeneratorNode.generate()
+		print(get_player_start())
+		floor_generated.emit()
+```
+
+If you run this scene with F6, you should see a window with your room open and you should see a vector in the output window, with dark brown walls and a tan floor.
+
+<details>
+<summary>Full code for `generator.gd`</summary>
+
+```
+extends Node2D
+class_name Generator
+
+@export var min_room_width: int = 3
+@export var min_room_height: int = 3
+@export var max_room_width: int = 500
+@export var max_room_height: int = 500
+@export var game_width: int = 1600
+@export var game_height: int = 1200
+@export var tile_map_layer: TileMapLayer = null
+@export var draw_outline: bool = false
+
+
+signal floor_generated
+signal floor_is_cleared
+
+
+func _ready() -> void:
+	$GeneratorNode.initialize(min_room_width, min_room_height, max_room_width, max_room_height, game_width,
+		game_height, tile_map_layer, draw_outline)
+	if get_parent().name == "root":
+		$GeneratorNode.generate()
+		print(get_player_start())
+		floor_generated.emit()
+
+
+func generate() -> void:
+	$GeneratorNode.generate()
+	floor_generated.emit()
+
+
+func clear_floor() -> void:
+	$GeneratorNode.clear_floor()
+	floor_is_cleared.emit()
+
+
+func get_player_start() -> Vector2:
+	return $GeneratorNode.get_player_start()
+```
+</details>
+<details>
+<summary>Full code for `generator_node.gd`</summary>
+
+```
+extends Control
+class_name GeneratorNode
+
+var min_room_width: int = 3
+var min_room_height: int = 3
+var max_room_width: int = 500
+var max_room_height: int = 500
+var game_width: int = 1600
+var game_height: int = 1200
+var tile_map_layer: TileMapLayer = null
+var draw_outline: bool = false
+
+var wall_vector: Vector2i
+var floor_vector: Vector2i
+var filler_vector: Vector2i
+var exit_vector: Vector2i
+var wall_tile_quadrant_size: int = 0
+
+var room_listing: Dictionary
+
+
+func clear_floor() -> void:
+	room_listing = {}
+	tile_map_layer.clear()
+
+
+func generate() -> void:
+	var grid: Dictionary = {Vector2i(0,0): {"x_start": 0, "y_start": 0}}
+	room_listing = _generate_room(grid)
+	_draw_rooms()
+
+
+func initialize(inc_min_room_width: int, inc_min_room_height: int, inc_max_room_width: int, inc_max_room_height: int,
+				inc_game_width: int, inc_game_height: int, inc_tile_map_layer: TileMapLayer, inc_draw_outline: bool) -> void:
+	min_room_width = inc_min_room_width
+	min_room_height = inc_min_room_height
+	max_room_width = inc_max_room_width
+	max_room_height = inc_max_room_height
+	game_width = inc_game_width
+	game_height = inc_game_height
+	tile_map_layer = inc_tile_map_layer
+	draw_outline = inc_draw_outline
+	_get_main_tiles()
+
+func _ready() -> void:
+	pass
+	
+	
+func _get_main_tiles() -> void:
+	var terrains = {}
+	wall_tile_quadrant_size = tile_map_layer.rendering_quadrant_size
+	for terrain in tile_map_layer.tile_set.get_terrains_count(0):
+		terrains[str(terrain)] = tile_map_layer.tile_set.get_terrain_name(0,terrain)
+	var source = tile_map_layer.tile_set.get_source(0)
+	#check every tile to find its terrain
+	for tile in source.get_tiles_count():
+		var tile_data = source.get_tile_data(source.get_tile_id(tile), 0)
+		if tile_data.terrain != -1:
+			match terrains[str(tile_data.terrain)]:
+				"Wall":
+					wall_vector = source.get_tile_id(tile)
+				"Floor":
+					floor_vector = source.get_tile_id(tile)
+				"Filler":
+					filler_vector = source.get_tile_id(tile)
+				"Exit":
+					exit_vector = source.get_tile_id(tile)
+	
+
+func get_player_start() -> Vector2i:
+	var start_location: Vector2i
+	start_location = Vector2i(randi_range(room_listing["y"] + wall_tile_quadrant_size, (room_listing["width"] - 1) * wall_tile_quadrant_size),
+		randi_range(room_listing["x"] + wall_tile_quadrant_size, (room_listing["height"] - 1) * wall_tile_quadrant_size ))
+	return start_location
+
+
+func _generate_room(grid_location) -> Dictionary:
+	var room: Dictionary = {}
+	for item in grid_location:
+		room["x"] = randi_range(grid_location[item]["x_start"], 
+			grid_location[item]["x_start"])
+		room["y"] = randi_range(grid_location[item]["y_start"], 
+			grid_location[item]["y_start"])
+		room["width"] = randi_range(min_room_width, max_room_width - (room["x"] - grid_location[item]["x_start"]))
+		room["height"] = randi_range(min_room_height, max_room_height - (room["y"] - grid_location[item]["y_start"]))
+	return room
+
+
+func _draw_rooms() -> void:
+	if draw_outline:
+		for x in range(0, game_width):
+			if x % 25 == 0:
+				tile_map_layer.set_cell(Vector2i(x,0), 0, floor_vector)
+			else:
+				tile_map_layer.set_cell(Vector2i(x,0), 0, filler_vector)
+		for y in range(0, game_height):
+			if y % 25 == 0:
+				tile_map_layer.set_cell(Vector2i(0,y), 0, floor_vector)
+			else:
+				tile_map_layer.set_cell(Vector2i(0,y), 0, filler_vector)
+
+	for x in range(room_listing["x"], (room_listing["x"] + room_listing["width"] + 1)):
+		for y in range(room_listing["y"], (room_listing["y"] + room_listing["height"] + 1)):
+			if x == room_listing["x"] || x == (room_listing["x"] + room_listing["width"]):
+				tile_map_layer.set_cell(Vector2i(x,y), 0, wall_vector)
+			elif y == room_listing["y"] || y == (room_listing["y"] + room_listing["height"]):
+				tile_map_layer.set_cell(Vector2i(x,y), 0, wall_vector)
+			else:
+				tile_map_layer.set_cell(Vector2i(x,y), 0, floor_vector)
+```
+
+</details>
